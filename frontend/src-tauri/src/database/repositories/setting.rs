@@ -154,18 +154,21 @@ impl SettingsRepository {
         pool: &SqlitePool,
         provider: &str,
         model: &str,
+        base_url: Option<&str>,
     ) -> std::result::Result<(), sqlx::Error> {
         sqlx::query(
             r#"
-            INSERT INTO transcript_settings (id, provider, model)
-            VALUES ('1', $1, $2)
+            INSERT INTO transcript_settings (id, provider, model, baseUrl)
+            VALUES ('1', $1, $2, $3)
             ON CONFLICT(id) DO UPDATE SET
                 provider = excluded.provider,
-                model = excluded.model
+                model = excluded.model,
+                baseUrl = excluded.baseUrl
             "#,
         )
         .bind(provider)
         .bind(model)
+        .bind(base_url)
         .execute(pool)
         .await?;
 
@@ -184,6 +187,7 @@ impl SettingsRepository {
             "elevenLabs" => "elevenLabsApiKey",
             "groq" => "groqApiKey",
             "openai" => "openaiApiKey",
+            "remoteOpenAI" => "remoteOpenAIApiKey",
             _ => {
                 return Err(sqlx::Error::Protocol(
                     format!("Invalid provider: {}", provider).into(),
@@ -216,6 +220,7 @@ impl SettingsRepository {
             "elevenLabs" => "elevenLabsApiKey",
             "groq" => "groqApiKey",
             "openai" => "openaiApiKey",
+            "remoteOpenAI" => "remoteOpenAIApiKey",
             _ => {
                 return Err(sqlx::Error::Protocol(
                     format!("Invalid provider: {}", provider).into(),

@@ -10,9 +10,10 @@ import { ParakeetModelManager } from './ParakeetModelManager';
 
 
 export interface TranscriptModelProps {
-    provider: 'localWhisper' | 'parakeet' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai';
+    provider: 'localWhisper' | 'parakeet' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai' | 'remoteOpenAI';
     model: string;
     apiKey?: string | null;
+    baseUrl?: string | null;
 }
 
 export interface TranscriptSettingsProps {
@@ -57,8 +58,9 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
         elevenLabs: ['eleven_multilingual_v2'],
         groq: ['llama-3.3-70b-versatile'],
         openai: ['gpt-4o'],
+        remoteOpenAI: [], // Free-text model name; user controls it via input below.
     };
-    const requiresApiKey = transcriptModelConfig.provider === 'deepgram' || transcriptModelConfig.provider === 'elevenLabs' || transcriptModelConfig.provider === 'openai' || transcriptModelConfig.provider === 'groq';
+    const requiresApiKey = transcriptModelConfig.provider === 'deepgram' || transcriptModelConfig.provider === 'elevenLabs' || transcriptModelConfig.provider === 'openai' || transcriptModelConfig.provider === 'groq' || transcriptModelConfig.provider === 'remoteOpenAI';
 
     const handleInputClick = () => {
         if (isApiKeyLocked) {
@@ -123,6 +125,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 <SelectContent>
                                     <SelectItem value="parakeet">⚡ Parakeet (Recommended - Real-time / Accurate)</SelectItem>
                                     <SelectItem value="localWhisper">🏠 Local Whisper (High Accuracy)</SelectItem>
+                                    <SelectItem value="remoteOpenAI">🌐 Self-hosted / OpenAI-compatible</SelectItem>
                                     {/* <SelectItem value="deepgram">☁️ Deepgram (Backup)</SelectItem>
                                     <SelectItem value="elevenLabs">☁️ ElevenLabs</SelectItem>
                                     <SelectItem value="groq">☁️ Groq</SelectItem>
@@ -130,7 +133,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 </SelectContent>
                             </Select>
 
-                            {uiProvider !== 'localWhisper' && uiProvider !== 'parakeet' && (
+                            {uiProvider !== 'localWhisper' && uiProvider !== 'parakeet' && uiProvider !== 'remoteOpenAI' && (
                                 <Select
                                     value={transcriptModelConfig.model}
                                     onValueChange={(value) => {
@@ -151,6 +154,50 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
 
                         </div>
                     </div>
+
+                    {uiProvider === 'remoteOpenAI' && (
+                        <div className="space-y-3 mx-1">
+                            <div>
+                                <Label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Base URL
+                                </Label>
+                                <Input
+                                    type="text"
+                                    placeholder="https://your-server/v1"
+                                    className="focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                                    value={transcriptModelConfig.baseUrl || ''}
+                                    onChange={(e) =>
+                                        setTranscriptModelConfig({
+                                            ...transcriptModelConfig,
+                                            provider: 'remoteOpenAI',
+                                            baseUrl: e.target.value,
+                                        })
+                                    }
+                                />
+                                <p className="text-xs text-gray-500 mt-1">
+                                    Root of an endpoint exposing <code>/audio/transcriptions</code> (OpenAI, Groq, whisper.cpp server, etc.).
+                                </p>
+                            </div>
+                            <div>
+                                <Label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Model
+                                </Label>
+                                <Input
+                                    type="text"
+                                    placeholder="whisper-1"
+                                    className="focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                                    value={transcriptModelConfig.model || ''}
+                                    onChange={(e) =>
+                                        setTranscriptModelConfig({
+                                            ...transcriptModelConfig,
+                                            provider: 'remoteOpenAI',
+                                            model: e.target.value,
+                                        })
+                                    }
+                                />
+                            </div>
+                        </div>
+                    )}
 
                     {uiProvider === 'localWhisper' && (
                         <div className="mt-6">

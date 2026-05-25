@@ -101,6 +101,8 @@ pub struct TranscriptConfig {
     pub model: String,
     #[serde(rename = "apiKey")]
     pub api_key: Option<String>,
+    #[serde(rename = "baseUrl", skip_serializing_if = "Option::is_none", default)]
+    pub base_url: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -109,6 +111,8 @@ pub struct SaveTranscriptConfigRequest {
     pub model: String,
     #[serde(rename = "apiKey")]
     pub api_key: Option<String>,
+    #[serde(rename = "baseUrl", skip_serializing_if = "Option::is_none", default)]
+    pub base_url: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -619,6 +623,7 @@ pub async fn api_get_transcript_config<R: Runtime>(
                         provider: config.provider,
                         model: config.model,
                         api_key,
+                        base_url: config.base_url,
                     }))
                 }
                 Err(e) => {
@@ -637,6 +642,7 @@ pub async fn api_get_transcript_config<R: Runtime>(
                 provider: "parakeet".to_string(),
                 model: crate::config::DEFAULT_PARAKEET_MODEL.to_string(),
                 api_key: None,
+                base_url: None,
             }))
         }
         Err(e) => {
@@ -653,6 +659,7 @@ pub async fn api_save_transcript_config<R: Runtime>(
     provider: String,
     model: String,
     api_key: Option<String>,
+    base_url: Option<String>,
     _auth_token: Option<String>,
 ) -> Result<serde_json::Value, String> {
     log_info!(
@@ -661,7 +668,10 @@ pub async fn api_save_transcript_config<R: Runtime>(
     );
     let pool = state.db_manager.pool();
 
-    if let Err(e) = SettingsRepository::save_transcript_config(pool, &provider, &model).await {
+    if let Err(e) =
+        SettingsRepository::save_transcript_config(pool, &provider, &model, base_url.as_deref())
+            .await
+    {
         log_error!("Failed to save transcript config: {}", e);
         return Err(e.to_string());
     }

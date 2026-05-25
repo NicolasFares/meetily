@@ -135,10 +135,36 @@ pub async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) 
                 }
             }
         }
+        "remoteOpenAI" => {
+            info!("🌐 Validating remote OpenAI-compatible transcription endpoint...");
+            let base_url = match config.base_url.as_deref() {
+                Some(url) if !url.trim().is_empty() => url.trim().to_string(),
+                _ => return Err(
+                    "Remote transcription requires a Base URL. Set it in Transcript Settings.".to_string()
+                ),
+            };
+            if config.model.trim().is_empty() {
+                return Err(
+                    "Remote transcription requires a model name. Set it in Transcript Settings.".to_string()
+                );
+            }
+            match crate::audio::transcription::remote_openai_provider::ping_remote_openai(&base_url)
+                .await
+            {
+                Ok(()) => {
+                    info!("✅ Remote endpoint reachable: {}", base_url);
+                    Ok(())
+                }
+                Err(e) => {
+                    warn!("❌ Remote endpoint check failed: {}", e);
+                    Err(format!("Remote transcription endpoint check failed: {}", e))
+                }
+            }
+        }
         other => {
             warn!("❌ Unsupported transcription provider for local recording: {}", other);
             Err(format!(
-                "Provider '{}' is not supported for local transcription. Please select 'localWhisper' or 'parakeet'.",
+                "Provider '{}' is not supported. Please select 'localWhisper', 'parakeet', or 'remoteOpenAI'.",
                 other
             ))
         }
@@ -184,6 +210,23 @@ pub async fn get_or_init_transcription_engine<R: Runtime>(
 
     // Initialize the appropriate engine based on provider
     match config.provider.as_str() {
+        "remoteOpenAI" => {
+            info!("🌐 Initializing remote OpenAI-compatible transcription provider");
+            let base_url = config
+                .base_url
+                .clone()
+                .filter(|s| !s.trim().is_empty())
+                .ok_or_else(|| {
+                    "Remote transcription requires a Base URL. Set it in Transcript Settings."
+                        .to_string()
+                })?;
+            let provider = crate::audio::transcription::RemoteOpenAiProvider::new(
+                base_url,
+                config.model,
+                config.api_key,
+            );
+            Ok(TranscriptionEngine::Provider(Arc::new(provider)))
+        }
         "parakeet" => {
             info!("🦜 Initializing Parakeet transcription engine");
 
