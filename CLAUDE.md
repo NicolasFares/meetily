@@ -35,15 +35,21 @@ clean_build_windows.bat     # Production build
 # Manual Commands
 pnpm install                # Install dependencies
 pnpm run dev                # Next.js dev server (port 3118)
-pnpm run tauri:dev          # Full Tauri development mode
-pnpm run tauri:build        # Production build
+pnpm run tauri:dev          # Tauri dev — auto-detects platform/GPU via scripts/tauri-auto.js
+pnpm run tauri:build        # Tauri build — auto-detects platform/GPU
+pnpm run lint               # next lint (no test or typecheck scripts exist)
 
-# GPU-Specific Builds (for testing acceleration)
-pnpm run tauri:dev:metal    # macOS Metal GPU
-pnpm run tauri:dev:cuda     # NVIDIA CUDA
-pnpm run tauri:dev:vulkan   # AMD/Intel Vulkan
-pnpm run tauri:dev:cpu      # CPU-only (no GPU)
+# Explicit GPU/backend feature builds (matching tauri:build:* variants exist)
+pnpm run tauri:dev:cpu       # CPU-only (no GPU)
+pnpm run tauri:dev:metal     # macOS Metal GPU
+pnpm run tauri:dev:coreml    # macOS CoreML (Apple Neural Engine)
+pnpm run tauri:dev:cuda      # NVIDIA CUDA
+pnpm run tauri:dev:vulkan    # AMD/Intel Vulkan
+pnpm run tauri:dev:hipblas   # AMD HIP/ROCm
+pnpm run tauri:dev:openblas  # OpenBLAS (CPU BLAS)
 ```
+
+No Rust test suite is present in `frontend/src-tauri` (no `*_test.rs` files and no `tests/` directory). Don't invent test commands.
 
 ### Backend Development (FastAPI Server)
 
@@ -59,11 +65,17 @@ build_whisper.cmd small               # Build Whisper with model
 start_with_output.ps1                 # Interactive setup and start
 clean_start_backend.cmd               # Start server
 
+# First-time DB setup
+./setup-db.sh                         # macOS/Linux
+.\setup-db.ps1                        # Windows
+
 # Docker (Cross-Platform)
 ./run-docker.sh start --interactive   # Interactive setup (macOS/Linux)
 .\run-docker.ps1 start -Interactive   # Interactive setup (Windows)
 ./run-docker.sh logs --service app    # View logs
 ```
+
+**Backend Docker layout**: `docker-compose.yml` orchestrates `Dockerfile.app` (FastAPI) plus one of `Dockerfile.server-cpu` / `Dockerfile.server-gpu` / `Dockerfile.server-macos` for Whisper. For deeper script details see `backend/SCRIPTS_DOCUMENTATION.md`; for endpoint details see `backend/API_DOCUMENTATION.md`.
 
 **Available Whisper Models**: `tiny`, `tiny.en`, `base`, `base.en`, `small`, `small.en`, `medium`, `medium.en`, `large-v1`, `large-v2`, `large-v3`, `large-v3-turbo`
 
@@ -119,9 +131,9 @@ Raw Audio (Mic + System)
 
 **Key Insight**: The pipeline performs **professional audio mixing** (RMS-based ducking, clipping prevention) for recording, while simultaneously applying **Voice Activity Detection (VAD)** to send only speech segments to Whisper for transcription.
 
-### Audio Device Modularization (Recently Completed)
+### Audio Device Module Layout
 
-**Context**: The audio system was refactored from a monolithic 1028-line `core.rs` file into focused modules. See [AUDIO_MODULARIZATION_PLAN.md](AUDIO_MODULARIZATION_PLAN.md) for details.
+The audio system is split into device discovery, capture, and pipeline modules:
 
 ```
 audio/
@@ -262,70 +274,6 @@ macro_rules! perf_debug {
 
 **Pattern**: Tauri commands update Rust state → Emit events → Frontend listeners update React state → Context propagates to components
 
-## Common Development Tasks
-
-### Adding a New Audio Device Platform
-
-1. Create platform file: `audio/devices/platform/{platform_name}.rs`
-2. Implement device enumeration for the platform
-3. Add platform-specific configuration in `audio/devices/configuration.rs`
-4. Update `audio/devices/platform/mod.rs` to export new platform functions
-5. Test with `cargo check` and platform-specific device tests
-
-### Adding a New Tauri Command
-
-1. Define command in `src/lib.rs`:
-   ```rust
-   #[tauri::command]
-   async fn my_command(arg: String) -> Result<String, String> { /* ... */ }
-   ```
-2. Register in `tauri::Builder`:
-   ```rust
-   .invoke_handler(tauri::generate_handler![
-       start_recording,
-       my_command,  // Add here
-   ])
-   ```
-3. Call from frontend:
-   ```typescript
-   const result = await invoke<string>('my_command', { arg: 'value' });
-   ```
-
-### Modifying Audio Pipeline Behavior
-
-**Location**: `frontend/src-tauri/src/audio/pipeline.rs`
-
-Key components:
-- `AudioMixerRingBuffer`: Manages mic + system audio synchronization
-- `ProfessionalAudioMixer`: RMS-based ducking and mixing
-- `AudioPipelineManager`: Orchestrates VAD, mixing, and distribution
-
-**Testing Audio Changes**:
-```bash
-# Enable verbose audio logging
-RUST_LOG=app_lib::audio=debug ./clean_run.sh
-
-# Monitor audio metrics in real-time
-# Check Developer Console in the app (Cmd+Shift+I on macOS)
-```
-
-### Backend API Development
-
-**Adding New Endpoints** (backend/app/main.py):
-```python
-@app.post("/api/my-endpoint")
-async def my_endpoint(request: MyRequest) -> MyResponse:
-    # Use DatabaseManager for persistence
-    db = DatabaseManager()
-    result = await db.some_operation()
-    return result
-```
-
-**Database Operations** (backend/app/db.py):
-- All meeting data stored in SQLite
-- Use `DatabaseManager` class for all DB operations
-- Async operations with `aiosqlite`
-
 ## Testing and Debugging
 
 ### Frontend Debugging
@@ -356,16 +304,6 @@ $env:RUST_LOG="debug"; ./clean_run_windows.bat
 - Swagger UI: http://localhost:5167/docs
 - ReDoc: http://localhost:5167/redoc
 
-### Audio Pipeline Debugging
-
-**Key Metrics** (emitted by pipeline):
-- Buffer sizes (mic/system)
-- Mixing window count
-- VAD detection rate
-- Dropped chunk warnings
-
-**Monitor via Developer Console**: The app includes real-time metrics display when recording.
-
 ## Platform-Specific Notes
 
 ### macOS
@@ -385,44 +323,13 @@ $env:RUST_LOG="debug"; ./clean_run_windows.bat
 - **GPU**: CUDA (NVIDIA) or Vulkan via Cargo features
 - **Dependencies**: Requires cmake, llvm, libomp
 
-## Performance Optimization Guidelines
-
-### Audio Processing
-- Use `perf_debug!()` / `perf_trace!()` for hot-path logging (zero cost in release)
-- Batch audio metrics using `AudioMetricsBatcher` (pipeline.rs)
-- Pre-allocate buffers with `AudioBufferPool` (buffer_pool.rs)
-- VAD filtering reduces Whisper load by ~70% (only processes speech)
-
-### Whisper Transcription
-- **Model Selection**: Balance accuracy vs speed
-  - Development: `base` or `small` (fast iteration)
-  - Production: `medium` or `large-v3` (best quality)
-- **GPU Acceleration**: 5-10x faster than CPU
-- **Parallel Processing**: Available in `whisper_engine/parallel_processor.rs` for batch workloads
-
-### Frontend Performance
-- React state updates batched via Sidebar context
-- Transcript rendering virtualized for large meetings
-- Audio level monitoring throttled to 60fps
-
 ## Important Constraints and Gotchas
 
-1. **Audio Chunk Size**: Pipeline expects consistent 48kHz sample rate. Resampling happens at capture time.
+1. **System audio on macOS requires a virtual device** (e.g., BlackHole). ScreenCaptureKit only delivers system audio via this route; without it, only the microphone is captured. Also requires screen recording permission, not just microphone.
 
-2. **Platform Audio Quirks**:
-   - macOS: ScreenCaptureKit requires macOS 13+, needs screen recording permission
-   - Windows: WASAPI exclusive mode can conflict with other apps
-   - System audio requires virtual device (BlackHole on macOS, WASAPI loopback on Windows)
+2. **Whisper models are cached after first load.** Switching models requires an app restart or an explicit unload/reload — silent failures otherwise look like "the new model didn't take effect."
 
-3. **Whisper Model Loading**: Models are loaded once and cached. Changing models requires app restart or manual unload/reload.
-
-4. **Backend Dependency**: Frontend can run standalone (local Whisper), but meeting persistence and LLM features require backend running.
-
-5. **CORS Configuration**: Backend allows all origins (`"*"`) for development. Restrict for production deployment.
-
-6. **File Paths**: Use Tauri's path APIs (`downloadDir`, etc.) for cross-platform compatibility. Never hardcode paths.
-
-7. **Audio Permissions**: Request permissions early. macOS requires both microphone AND screen recording for system audio.
+3. **Frontend can run standalone (local Whisper only); the FastAPI backend is required for meeting persistence and LLM summarization.** Treat them as separable when debugging — recording/transcription works without the backend.
 
 ## Repository-Specific Conventions
 
@@ -433,7 +340,6 @@ $env:RUST_LOG="debug"; ./clean_run_windows.bat
   - `main`: Stable releases
   - `fix/*`: Bug fixes
   - `enhance/*`: Feature enhancements
-  - Current: `fix/audio-mixing` (working on audio pipeline improvements)
 
 ## Key Files Reference
 
@@ -453,3 +359,11 @@ $env:RUST_LOG="debug"; ./clean_run_windows.bat
 
 **Whisper Integration**:
 - [frontend/src-tauri/src/whisper_engine/whisper_engine.rs](frontend/src-tauri/src/whisper_engine/whisper_engine.rs) - Whisper model management and transcription
+
+**Project Docs**:
+- [README.md](README.md) - User-facing overview, install, project mission
+- [CONTRIBUTING.md](CONTRIBUTING.md) - Contribution workflow
+- [BLUETOOTH_PLAYBACK_NOTICE.md](BLUETOOTH_PLAYBACK_NOTICE.md) - Known issue with Bluetooth audio devices during recording
+- [PRIVACY_POLICY.md](PRIVACY_POLICY.md) - Privacy stance
+- [backend/API_DOCUMENTATION.md](backend/API_DOCUMENTATION.md) - Backend API reference
+- [backend/SCRIPTS_DOCUMENTATION.md](backend/SCRIPTS_DOCUMENTATION.md) - Backend build/run script reference
